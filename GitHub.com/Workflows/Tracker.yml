@@ -1,0 +1,59 @@
+# Save this file in your repo at:  .github/workflows/tracker.yml
+#
+# Runs the Polymarket copy-trade alert bot 24/7 on GitHub's servers for free
+# (in a PUBLIC repo). Each run lasts about 5h45m. The hourly schedule keeps
+# a next run queued, so a fresh run takes over as soon as the last one ends.
+# Your ntfy topic and other keys live in Secrets, so they stay hidden.
+
+name: Polymarket Tracker
+
+on:
+  schedule:
+    - cron: "7 * * * *"      # hourly check; queues the next run if needed
+  workflow_dispatch:          # "Run workflow" button for starting it manually
+
+concurrency:
+  group: polymarket-tracker
+  cancel-in-progress: false   # never kill the running tracker; queue instead
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore seen-trades memory
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: pm-state-${{ github.run_id }}
+          restore-keys: pm-state-
+
+      - name: Run tracker
+        env:
+          STATE_FILE: state.json
+          MAX_RUNTIME: "20700"   # 5h45m, then hands off to the queued run
+          LOOKBACK: "900"        # catch trades made during the hand-off gap
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          # Optional tuning (Settings → Secrets and variables → Actions → Variables)
+          TOP: ${{ vars.TOP }}
+          PERIOD: ${{ vars.PERIOD }}
+          CATEGORY: ${{ vars.CATEGORY }}
+          MIN_USDC: ${{ vars.MIN_USDC }}
+          POLL: ${{ vars.POLL }}
+        run: python3 polymarket_copytrade_alerts.py
+
+      - name: Save seen-trades memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: pm-state-${{ github.run_id }}-${{ github.run_attempt }}
